@@ -1,89 +1,136 @@
+<div align="center">
+
 # claude-panel
 
-A Claude Code control panel for **Hyprland + Quickshell**, made on and for the
-[Caelestia](https://github.com/caelestia-dots/shell) desktop (works on any Hyprland setup with Quickshell).
+**One quiet window for every Claude Code session you run.**
 
-One window that runs and tracks all your Claude Code sessions:
+A control panel for Claude Code on Hyprland, built with Quickshell for the
+[Caelestia](https://github.com/caelestia-dots/shell) desktop.
 
-- **Real Claude Code sessions, several at once.** Each panel session is the actual `claude` CLI in a terminal;
-  the ones you are not looking at keep running. Switch with a click or `Alt+1..9`.
-- **Sessions in other windows.** Claude sessions you started in normal terminals are listed with their status
-  (working / idle) and how long ago they last did something. Click one to jump to its window.
-- **Per session:** model (Opus / Sonnet / Fable / Haiku) and effort switch (relaunches the same conversation with
-  `--model` / `--effort`, your saved default is never changed), context use, Claude's task list,
-  and every file it changed with a diff view.
-- **Plan usage** (5-hour and weekly), red from 80%.
-- **Notifications** when a session finishes or needs you and you are not looking at it.
-- **History:** resume any past conversation in the panel (or jump to it if it is open somewhere else).
-- **Survives restarts:** open sessions stay in the list and resume when you click them.
-- A short black boot screen that says hi.
-- Answers Claude's "do you trust this folder?" question for you when it opens in a folder that is not trusted yet
-  (your home folder always asks). Remove `onNowMsChanged` in `Session.qml` if you don't want that.
+<br>
 
-The panel is a normal window: it stays on the workspace where you opened it.
+<img src="docs/panel.png" alt="claude-panel with three sessions open" width="100%">
 
-| Key | What it does |
+</div>
+
+<br>
+
+## What it does
+
+**Runs real sessions, side by side.** Each session in the panel is the actual `claude` CLI in a terminal, not a
+re-implementation. The sessions you are not looking at keep working. Switch with a click or `Alt + 1…9`.
+
+**Sees the rest of your sessions.** Claude Code sessions running in normal terminals are listed under
+*Other windows*, with their `/rename` name, status and last activity. Click one to jump to its window.
+
+**Keeps the controls next to the terminal:**
+
+| | |
 |---|---|
-| `SUPER + A` | open it here · hide it (if focused) · jump to it (if it is on another workspace) |
-| `SUPER + SHIFT + A` | close it for good (its sessions end, and resume next time you open it) |
-| `Alt + 1..9` (inside) | switch session |
-| `Ctrl + Shift + C / V` (inside) | copy / paste in the terminal |
+| **Model & effort** | Opus, Sonnet, Fable or Haiku, and effort from Low to Max. A switch relaunches the *same* conversation with the new flags. Your saved default is never changed. |
+| **Usage & context** | Plan usage for the 5-hour and weekly windows, plus context use. Both turn red from 80%. |
+| **Changed files** | Every file Claude edited in the session, with a diff view one click away. |
+| **Tasks** | Claude's task list, when it keeps one. |
+| **History** | Resume any past conversation in the panel. |
+| **Notifications** | Sent when a session finishes or needs you while you are looking elsewhere. |
 
-## Needs
+**Stays out of trouble.**
 
-- Hyprland (Lua or classic config), [Quickshell](https://quickshell.org) (`qs`)
-- `qmltermwidget` (Qt 6 build; Arch: `sudo pacman -S qmltermwidget`)
-- [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) 2.1 or newer
-- `python3`, `jq`
-- Fonts: Inter, JetBrainsMono Nerd Font, Material Symbols Rounded (Caelestia ships all three)
+- Open sessions survive a restart and resume where they left off, with the same model, effort and changed-file list.
+- A conversation that is already open in another window is never started a second time. The panel offers to jump there instead.
+- The panel answers Claude's "do you trust this folder?" question for folders that ask. Your home folder asks every time.
+
+<br>
+
+<div align="center">
+<img src="docs/diff.png" alt="Diff view of a file Claude changed" width="49%">&nbsp;
+<img src="docs/boot.png" alt="Boot screen" width="49%">
+</div>
+
+<br>
+
+## Keys
+
+| Key | |
+|---|---|
+| <kbd>Super</kbd> <kbd>A</kbd> | Open here, hide when focused, or jump to it from another workspace |
+| <kbd>Super</kbd> <kbd>Shift</kbd> <kbd>A</kbd> | Close for good. Sessions end and resume the next time you open it |
+| <kbd>Alt</kbd> <kbd>1…9</kbd> | Switch session |
+| <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>C</kbd> / <kbd>V</kbd> | Copy and paste in the terminal |
+
+The panel is a normal window, so it stays on the workspace where you opened it.
 
 ## Install
+
+**Requirements**
+
+- Hyprland (Lua or classic config) and [Quickshell](https://quickshell.org)
+- `qmltermwidget`, the Qt 6 build. On Arch: `sudo pacman -S qmltermwidget`
+- [Claude Code](https://docs.claude.com/en/docs/claude-code) 2.1 or newer
+- `python3` and `jq`
+- The fonts Inter, JetBrainsMono Nerd Font and Material Symbols Rounded. Caelestia ships all three.
+
+**Steps**
 
 ```sh
 git clone https://github.com/raaixd/claude-panel
 cd claude-panel
-./install.sh --bind      # --bind adds the two keys to ~/.config/caelestia/hypr-user.lua (or .conf)
+./install.sh --bind
 ```
 
-Without Caelestia, add the keys yourself:
+`--bind` adds the two keys to `~/.config/caelestia/hypr-user.lua`, or to `.conf` if that's what you use.
+On any other Hyprland setup, add the keys yourself:
 
 ```lua
--- Hyprland Lua config
-hl.bind("SUPER + A", hl.dsp.exec_cmd(os.getenv("HOME") .. "/.local/bin/claude-panel"))
+-- Lua config
+hl.bind("SUPER + A",         hl.dsp.exec_cmd(os.getenv("HOME") .. "/.local/bin/claude-panel"))
 hl.bind("SUPER + SHIFT + A", hl.dsp.exec_cmd(os.getenv("HOME") .. "/.local/bin/claude-panel quit"))
 ```
 
 ```ini
 # hyprland.conf
-bind = SUPER, A, exec, ~/.local/bin/claude-panel
+bind = SUPER, A,       exec, ~/.local/bin/claude-panel
 bind = SUPER SHIFT, A, exec, ~/.local/bin/claude-panel quit
 ```
 
-Optional, for a frosted look behind the window: enable blur for transparent windows in your Hyprland decoration settings.
-The greeting uses your login name; set `CLAUDE_PANEL_NAME` to change it.
+To uninstall, run `./install.sh --remove`.
 
-Uninstall: `./install.sh --remove`.
+## Settings
+
+All settings are environment variables. Set them where your Hyprland session gets its environment.
+
+| Variable | |
+|---|---|
+| `CLAUDE_PANEL_NAME` | The name in the greeting. Defaults to your login name. |
+| `CLAUDE_PANEL_OTHERS_UNDER` | Only list other-window sessions whose folder is under this path. |
+| `CLAUDE_CONFIG_DIR` | Respected if you keep Claude Code's config somewhere other than `~/.claude`. |
+
+To see a frosted look behind the window, enable blur for transparent windows in your Hyprland decoration settings.
 
 ## How it works
 
-- `launch.sh` starts `claude` with `--settings <file>` that adds hooks and a status line **for that session only**.
-  Your `~/.claude/settings.json` is never touched.
-- `bridge.py` is what those hooks call: it appends events (prompt sent, stopped, needs you, file edits with diffs,
-  tasks) to `$XDG_RUNTIME_DIR/claude-panel/s/<session>/events.jsonl` and writes the status line data to
-  `status.json`. If you have `~/.claude/statusline-command.sh`, it still runs, so your own status line shows too.
-- Sessions in other windows come from `~/.claude/sessions/<pid>.json`, which Claude Code keeps for every running session.
-- The open-session list is saved in `~/.local/state/claude-panel/sessions.json`.
+```
+claude-panel ─▶ Quickshell window (shell.qml)
+                 └─ one Session.qml per session ─▶ Term.qml (qmltermwidget) ─▶ launch.sh ─▶ claude
+                                                                                     │
+                     events.jsonl / status.json  ◀── bridge.py ◀── hooks + status line ┘
+```
 
-Nothing leaves your machine; there is no network code.
+- `launch.sh` starts `claude` with `--settings <file>`. That file adds hooks and a status line for that session
+  only, so your `~/.claude/settings.json` is never touched.
+- `bridge.py` is what those hooks call. It records prompts, stops, file edits with diffs and tasks to
+  `$XDG_RUNTIME_DIR/claude-panel/s/<session>/`. If you have `~/.claude/statusline-command.sh`, it still runs.
+- Other windows come from `~/.claude/sessions/<pid>.json`, which Claude Code keeps for every running session.
+- The list of open sessions is saved to `~/.local/state/claude-panel/sessions.json`.
+
+Nothing leaves your machine. The panel contains no network code.
 
 ## Notes
 
-- Editing the panel's QML files makes Quickshell reload it, which restarts the Claude sessions inside it
-  (they resume when you click them).
-- A panel session uses about as much memory as Claude Code in a terminal (~250 MB); the panel itself is ~200 MB.
-- `schemes/DarkPastels.colorscheme` is a muted black terminal palette kept under a stock name, because qmltermwidget
-  does not pick up new scheme names from `COLORSCHEMES_DIR`.
+- **Editing the panel's files:** changes apply the next time it starts. Press <kbd>Super</kbd> <kbd>Shift</kbd> <kbd>A</kbd>, then <kbd>Super</kbd> <kbd>A</kbd>.
+- **Memory:** a panel session uses about as much as Claude Code in a terminal, around 250 MB. The window itself uses around 200 MB.
+- **Terminal colours:** `schemes/DarkPastels.colorscheme` is a muted black palette kept under a stock name, because qmltermwidget only loads scheme names it already knows.
 
 ## License
 
-MIT
+[MIT](LICENSE)

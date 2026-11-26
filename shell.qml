@@ -7,10 +7,13 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
-import Quickshell.Wayland
+import Quickshell.Hyprland
 
 ShellRoot {
     id: root
+    // never reload by itself when a file changes: a reload restarts every Claude session in the panel.
+    // To load an update: SUPER + SHIFT + A, then SUPER + A (sessions resume).
+    settings.watchFiles: false
 
     // ---------- look: monochrome. Black glass, white type, greys for hierarchy. No color except diff +/- ----------
     readonly property string textFont: "Inter"
@@ -32,6 +35,7 @@ ShellRoot {
 
     // ---------- state ----------
     property bool shown: false
+    readonly property bool panelFocused: shown && !!Hyprland.activeToplevel && Hyprland.activeToplevel.title === "Claude Panel"
     property bool greeted: false
     readonly property string home: Quickshell.env("HOME")
     // the boot screen says "hi <name>": CLAUDE_PANEL_NAME, else your login name
@@ -60,7 +64,9 @@ ShellRoot {
     function unreg(k) { delete items[k]; regV++; }
     function toggle() { shown ? close() : open(); }
     function open() {
-        now = Math.floor(Date.now() / 1000); shown = true; othersProc.running = true;
+        now = Math.floor(Date.now() / 1000); othersProc.running = true;
+        if (shown && !win.visible) shown = false;
+        shown = true;
         if (!greeted) { greeted = true; boot.play(); }
         if (slots.count === 0) newSession(home, "");
         else if (!cur) select(slots.get(0).key);
@@ -87,6 +93,7 @@ ShellRoot {
         save();
     }
     function hotkey(n) { if (n < slots.count) select(slots.get(n).key); }
+    function refreshOthers() { othersProc.running = true; }
     function focusOther(pid) { Quickshell.execDetached(["python3", "-I", bridge, "focus", String(pid)]); close(); }
     function openHistory(h) {
         for (let i = 0; i < slots.count; i++) if (items[slots.get(i).key] && items[slots.get(i).key].sid === h.id) { select(slots.get(i).key); page = "sessions"; return; }
@@ -95,7 +102,7 @@ ShellRoot {
         newSession(h.cwd, "", h.id, h.title); page = "sessions";
     }
     function notify(it, kind) {
-        if (shown && it.key === curKey) return;
+        if (panelFocused && it.key === curKey) return;
         const t = it.title || "Claude";
         Quickshell.execDetached(["notify-send", "-a", "Claude", "-i", "dialog-information",
             kind === "done" ? "Claude is done" : "Claude needs you", (kind === "done" ? "" : (it.note ? it.note + "\n" : "")) + t.slice(0, 90)]);
@@ -109,7 +116,7 @@ ShellRoot {
             let arr = [];
             for (let i = 0; i < slots.count; i++) {
                 const r = slots.get(i), it = root.items[r.key];
-                arr.push(it ? { key: r.key, cwd: it.cwd, sid: it.talked || !it.started ? it.sid : "", title: it.title, model: it.selModel, effort: it.selEffort }
+                arr.push(it ? { key: r.key, cwd: it.cwd, sid: it.talked || it.restored || !it.started ? it.sid : "", title: it.title, model: it.selModel, effort: it.selEffort }
                             : { key: r.key, cwd: r.cwd, sid: r.sid, title: r.title, model: r.mdl, effort: r.eff });
             }
             stateView.setText(JSON.stringify({ cur: root.curKey, slots: arr }, null, 1));
@@ -117,6 +124,7 @@ ShellRoot {
     }
     FileView { id: stateView; path: root.stateFile; blockLoading: true; atomicWrites: true }
     Component.onCompleted: {
+        othersProc.running = true;
         Quickshell.execDetached(["mkdir", "-p", stateFile.replace(/\/[^/]*$/, "")]);
         try {
             const st = JSON.parse(stateView.text());
@@ -128,8 +136,9 @@ ShellRoot {
     Process {
         id: othersProc
         command: ["python3", "-I", root.bridge, "others"]
-        stdout: StdioCollector { onStreamFinished: { try { root.others = JSON.parse(text); } catch (x) { } } }
+        stdout: StdioCollector { onStreamFinished: { try { root.others = JSON.parse(text); } catch (x) { } root.othersLoaded = true; } }
     }
+    property bool othersLoaded: false
     Timer { interval: root.shown ? 3000 : 20000; repeat: true; running: true; onTriggered: othersProc.running = true }
     Process {
         id: histProc
@@ -155,13 +164,16 @@ ShellRoot {
         function newSession(cwd: string): void { root.newSession(root.expand(cwd), ""); }
         function select(n: int): void { root.hotkey(n); }
         function closeCurrent(): void { if (root.cur) root.closeSession(root.curKey); }
+        function showDiff(path: string): void { if (root.tabs.indexOf(path) < 0) root.tabs = root.tabs.concat([path]); root.current = path; }
+        function showTerminal(): void { root.current = ""; if (root.cur) root.cur.focusTerm(); }
+        function history(on: bool): void { root.page = on ? "history" : "sessions"; if (on) histProc.running = true; }
         function model(id: string): void { if (root.cur) { root.cur.selModel = id; root.cur.relaunch(); } }
         function effort(level: string): void { if (root.cur) { root.cur.selEffort = level; root.cur.relaunch(); } }
         function text(s: string): void { if (root.cur && root.cur.term) root.cur.term.send(s); }
         function key(name: string): void { const m = { left: Qt.Key_Left, up: Qt.Key_Up, down: Qt.Key_Down, back: Qt.Key_Backspace, tab: Qt.Key_Tab, esc: Qt.Key_Escape, enter: Qt.Key_Return }; if (root.cur && root.cur.term) root.cur.term.key(m[name]); }
         function state(): string {
             let l = [];
-            for (let i = 0; i < slots.count; i++) { const it = root.items[slots.get(i).key]; if (it) l.push({ key: it.key, sid: it.sid, live: it.sessionLive, started: it.started, act: it.activity, title: it.title, model: it.modelName, cwd: it.cwd }); }
+            for (let i = 0; i < slots.count; i++) { const it = root.items[slots.get(i).key]; if (it) l.push({ key: it.key, sid: it.sid, live: it.sessionLive, started: it.started, act: it.activity, title: it.title, model: it.modelName, cwd: it.cwd, edits: it.edits.length, tasks: it.tasks.length }); }
             return JSON.stringify({ cur: root.curKey, sessions: l, others: root.others.length });
         }
     }
@@ -260,7 +272,9 @@ ShellRoot {
         visible: root.shown
         title: "Claude Panel"
         color: "transparent"
-        implicitWidth: 1760; implicitHeight: 1080
+        implicitWidth: Math.round((screen ? screen.width : 1920) * 0.92)
+        implicitHeight: Math.round((screen ? screen.height : 1200) * 0.9)
+        onVisibleChanged: if (!visible && root.shown) root.shown = false   // closed from outside (SUPER + Q)
 
         Rectangle {
             id: card
@@ -599,14 +613,15 @@ ShellRoot {
 
                     ColumnLayout {
                         id: tcol
+                        // only when Claude keeps a task list (or needs you): otherwise the space goes to changed files
+                        visible: tk.length > 0 || (!!root.cur && root.cur.note !== "")
                         Layout.fillWidth: true; Layout.fillHeight: true; Layout.preferredHeight: 3; Layout.leftMargin: 18; Layout.rightMargin: 12; Layout.topMargin: 18; spacing: 8
                         readonly property var tk: root.cur ? root.cur.tasks : []
                         RowLayout {
-                            Label { text: "Tasks"; Layout.fillWidth: true }
+                            Label { text: tcol.tk.length ? "Tasks" : root.cur && root.cur.activity === "waiting" ? "Needs you" : "Status"; Layout.fillWidth: true }
                             T { visible: tcol.tk.length > 0; text: tcol.tk.filter(x => x.s === "completed").length + "/" + tcol.tk.length; color: root.cMuted; font.pixelSize: 11; font.family: root.monoFont; Layout.rightMargin: 6 }
                         }
                         T { visible: !!root.cur && root.cur.note !== ""; text: root.cur ? root.cur.note : ""; color: root.cText; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true; maximumLineCount: 3 }
-                        T { visible: tcol.tk.length === 0; text: "No tasks yet"; color: root.cFaint; font.pixelSize: 12 }
                         ListView {
                             Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 2
                             model: tcol.tk
@@ -623,7 +638,7 @@ ShellRoot {
                             }
                         }
                     }
-                    Rule { Layout.fillWidth: true }
+                    Rule { Layout.fillWidth: true; visible: tcol.visible }
 
                     ColumnLayout {
                         id: fcol

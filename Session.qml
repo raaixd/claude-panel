@@ -35,6 +35,7 @@ Item {
     property bool needsTrust: false
     property bool trustSent: false
     property real termStartedAt: 0
+    property real runStartedAt: 0        // when this run began (termStartedAt moves while answering trust)
     property real nowMs: 0
     property int seen: 0
     property bool replaying: true
@@ -46,7 +47,14 @@ Item {
     readonly property var ctx: status.context_window || null
     readonly property real ctxPct: ctx && ctx.used_percentage != null ? ctx.used_percentage : -1
 
-    Component.onCompleted: { ui.reg(key, s); if (selected) ensureStarted(); }
+    property bool restored: false        // came from the saved list with a conversation to resume
+    property int elsewhere: 0            // pid of another window that already has this conversation open
+    property bool waitOthers: false
+    Component.onCompleted: { restored = sid !== ""; ui.reg(key, s); if (selected) ensureStarted(); }
+    Connections {   // resuming waits until the panel knows which conversations are open in other windows
+        target: s.ui
+        function onOthersLoadedChanged() { if (s.waitOthers) { s.waitOthers = false; s.ensureStarted(); } }
+    }
     Component.onDestruction: ui.unreg(key)
     onSelectedChanged: if (selected) { if (!started) ensureStarted(); else if (term) refreshT.restart(); }
     onSidChanged: ui.save()
@@ -55,6 +63,11 @@ Item {
 
     function ensureStarted() {
         if (started) return;
+        if (sid && !ui.othersLoaded) { waitOthers = true; return; }
+        // the same conversation running twice would write over itself: offer to go to it instead
+        const o = sid ? ui.others.find(x => !x.panel && x.sid === sid) : null;
+        if (o) { elsewhere = o.pid; return; }
+        elsewhere = 0;
         let a = sid ? ["--resume", sid] : [];
         if (selModel) a = a.concat(["--model", selModel]);
         if (selEffort) a = a.concat(["--effort", selEffort]);
@@ -62,9 +75,12 @@ Item {
     }
     function start(extra, keep) {
         started = true; ended = false;
-        sessionLive = false; trustSent = false; needsTrust = false; termStartedAt = Date.now(); nowMs = Date.now();
+        sessionLive = false; trustSent = false; needsTrust = false; termStartedAt = Date.now(); runStartedAt = termStartedAt; nowMs = Date.now();
         if (!keep) { status = ({}); activity = "idle"; note = ""; edits = []; tasks = []; seen = 0; replaying = true; }
-        pendingArgs = ["--run", runDir].concat(keep ? ["--keep"] : []).concat(extra);
+        // keep the panel's record (changed files, tasks) when the same conversation continues: a model/effort
+        // switch, or resuming a saved session after a restart. Only a brand-new conversation starts empty.
+        const same = keep || extra.indexOf("--resume") >= 0;
+        pendingArgs = ["--run", runDir].concat(same ? ["--keep"] : []).concat(extra);
         loader.source = "";
         if (!keep) ready = false;
         prep.running = true;     // make the session folder first, so the file watchers have something to watch
@@ -77,15 +93,17 @@ Item {
         activity = "idle"; ui.current = "";
         start(a, true); ui.save();
     }
-    function restartFresh() { sid = ""; talked = false; title = ""; start([], false); }
+    function restartFresh() { sid = ""; talked = false; restored = false; title = ""; elsewhere = 0; start([], false); ui.save(); }
     function focusTerm() { if (term) term.focusTerm(); }
     function refresh() { if (term) term.refresh(); }
     Timer { id: refreshT; interval: 120; onTriggered: { s.refresh(); s.focusTerm(); } }
 
     Process {
         id: prep
-        command: ["sh", "-c", 'mkdir -p "$1" && chmod 700 "$1" && touch "$1/events.jsonl" && for f in status trust; do [ -s "$1/$f.json" ] || echo "{}" > "$1/$f.json"; done', "sh", s.runDir]
-        onExited: { s.ready = true; loader.setSource("Term.qml", { workDir: s.cwd, args: s.pendingArgs }); }
+        // a new conversation empties the record; trust is re-checked on every start
+        command: ["sh", "-c", 'mkdir -p "$1" && chmod 700 "$1" && touch "$1/events.jsonl" && echo "{}" > "$1/trust.json" && if [ "$2" = fresh ]; then : > "$1/events.jsonl"; echo "{}" > "$1/status.json"; fi',
+                  "sh", s.runDir, s.pendingArgs.indexOf("--keep") >= 0 ? "keep" : "fresh"]
+        onExited: { s.ready = true; evFile.reload(); trustFile.reload(); loader.setSource("Term.qml", { workDir: s.cwd, args: s.pendingArgs }); }
     }
 
     // ---------- events from the hooks ----------
@@ -116,7 +134,8 @@ Item {
                 if (j >= 0) tk[j] = { id: e.id, t: e.t || tk[j].t, s: e.s || tk[j].s };
                 else if (e.t) tk.push({ id: e.id, t: e.t, s: e.s || "pending" });
             } else if (e.e === "SessionStart") {
-                sessionLive = true;
+                if ((e.ts || 0) >= runStartedAt - 1000) sessionLive = true;   // only this run's start counts
+
                 if (e.sid && e.sid !== sid) { talked = e.src === "resume"; sid = e.sid; }
                 else if (e.src === "resume") talked = true;
             } else if (e.e === "UserPromptSubmit") {
@@ -125,8 +144,13 @@ Item {
             }
             else if (e.e === "Stop") { activity = "idle"; note = ""; if (!replaying) ui.notify(s, "done"); }
             else if (e.e === "StopFailure") { activity = "idle"; note = "Stopped with an error"; }
-            else if (e.e === "Notification") { activity = "waiting"; note = e.msg || ""; if (!replaying) ui.notify(s, "needs"); }
+            else if (e.e === "Notification") {
+                // "Claude is waiting for your input" only means it has been idle a while: not a question for you
+                if (/waiting for your input/i.test(e.msg || "")) continue;
+                activity = "waiting"; note = e.msg || ""; if (!replaying) ui.notify(s, "needs");
+            }
         }
+        if (replaying) { activity = "idle"; note = ""; }   // a replayed record says nothing about right now
         seen = lines.length; edits = ed; tasks = tk; replaying = false;
     }
     FileView {
@@ -193,6 +217,22 @@ Item {
             Pill { visible: !!s.sid && s.talked; label: "Resume"; primary: true; onClicked: s.start(["--resume", s.sid], true) }
             Pill { label: "New"; primary: !(s.sid && s.talked); onClicked: s.restartFresh() }
             Pill { label: "Close"; onClicked: s.ui.closeSession(s.key) }
+        }
+    }
+
+    // this conversation is open in another window
+    Column {
+        visible: s.elsewhere !== 0 && !s.started
+        anchors.centerIn: parent; spacing: 16
+        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "This conversation is open in another window"
+               color: s.ui.cText; font.family: s.ui.textFont; font.pixelSize: 16; font.weight: Font.Light }
+        Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Running it here too would make the two copies write over each other."
+               color: s.ui.cMuted; font.family: s.ui.textFont; font.pixelSize: 12 }
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter; spacing: 8
+            Pill { label: "Go to that window"; primary: true; onClicked: s.ui.focusOther(s.elsewhere) }
+            Pill { label: "New session here"; onClicked: s.restartFresh() }
+            Pill { label: "Check again"; onClicked: { s.elsewhere = 0; s.ui.othersLoaded = false; s.waitOthers = true; s.ui.refreshOthers(); } }
         }
     }
 

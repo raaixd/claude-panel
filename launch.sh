@@ -29,18 +29,18 @@ unset CLAUDECODE CLAUDE_PID CLAUDE_EFFORT CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SES
 # --keep (from the panel's model/effort switch): same conversation, keep the panel's record
 if [ "${1:-}" = "--keep" ]; then
     shift
-    # a session with no messages has no transcript yet and cannot be resumed: start fresh instead
-    if [ "${1:-}" = "--resume" ] && ! ls "$HOME"/.claude/projects/*/"${2:-x}.jsonl" >/dev/null 2>&1; then shift 2; fi
 else
     : > "$RUN/events.jsonl"     # new session = fresh panel record
     echo "{}" > "$RUN/status.json"
 fi
+# a conversation with no messages has no transcript and cannot be resumed (claude would just exit): start fresh instead
+if [ "${1:-}" = "--resume" ] && ! ls "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"${2:-x}.jsonl" >/dev/null 2>&1; then shift 2; fi
 # does Claude still ask "do you trust this folder?" here? (your home folder: every time) -> the panel answers Yes
 python3 - "$PWD" > "$RUN/trust.json" <<'EOF2'
 import json, os, sys
 d = os.path.realpath(sys.argv[1]); home = os.path.expanduser("~")
 try:
-    p = json.load(open(os.path.join(home, ".claude.json"))).get("projects", {})
+    p = json.load(open(os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or home, ".claude.json"))).get("projects", {})
 except Exception:
     p = {}
 ok = False
@@ -52,5 +52,11 @@ while True:  # trust given to a parent folder covers this one (never the home fo
     x = os.path.dirname(x)
 print(json.dumps({"needs": not ok, "dir": d}))
 EOF2
+# started from a keybind, PATH is the compositor's and often lacks ~/.local/bin (where the claude installer puts it)
+export PATH="$PATH:$HOME/.local/bin:$HOME/.claude/local:$HOME/.npm-global/bin:$HOME/.bun/bin"
+if ! command -v claude >/dev/null 2>&1; then
+    echo "claude-panel: the claude command was not found. Install Claude Code, or put it on PATH." >&2
+    sleep 600; exit 1
+fi
 export TERM=xterm-256color COLORTERM=truecolor
 exec claude --settings "$RUN/settings.json" "$@"

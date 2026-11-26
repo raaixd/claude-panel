@@ -18,7 +18,8 @@ import time
 RUN = os.environ.get("CLAUDE_PANEL_RUN") or os.path.join(
     os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "claude-panel")
 HOME = os.path.expanduser("~")
-STATUSLINE = os.path.join(HOME, ".claude", "statusline-command.sh")
+CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
+STATUSLINE = os.path.join(CLAUDE_DIR, "statusline-command.sh")
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 MAX_ROWS = 400
 MAX_COL = 240
@@ -144,7 +145,7 @@ def first_prompt(path):
 
 
 def cmd_sessions():
-    base = os.path.join(HOME, ".claude", "projects")
+    base = os.path.join(CLAUDE_DIR, "projects")
     files = []
     try:
         for p in os.listdir(base):
@@ -198,12 +199,13 @@ def is_panel(pid):
 
 def cmd_others():
     """Claude sessions running outside the panel (each running claude registers in ~/.claude/sessions)."""
-    base = os.path.join(HOME, ".claude", "sessions")
+    base = os.path.join(CLAUDE_DIR, "sessions")
     out = []
     try:
         names = os.listdir(base)
     except OSError:
         names = []
+    only = os.environ.get("CLAUDE_PANEL_OTHERS_UNDER")  # optional: list only sessions under this folder
     for n in names:
         if not n.endswith(".json"):
             continue
@@ -219,10 +221,12 @@ def cmd_others():
         except OSError:
             continue
         panel = is_panel(pid)
+        if only and not panel and not (d.get("cwd") or "").startswith(os.path.realpath(os.path.expanduser(only))):
+            continue
         sid = d.get("sessionId") or ""
         tr = ""
-        for p in os.listdir(os.path.join(HOME, ".claude", "projects")):
-            c = os.path.join(HOME, ".claude", "projects", p, sid + ".jsonl")
+        for p in os.listdir(os.path.join(CLAUDE_DIR, "projects")):
+            c = os.path.join(CLAUDE_DIR, "projects", p, sid + ".jsonl")
             if os.path.exists(c):
                 tr = c
                 break
