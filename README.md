@@ -1,5 +1,10 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+  <img src="docs/logo-light.svg" alt="claude-panel logo" width="88">
+</picture>
+
 # claude-panel
 
 **One quiet window for every Claude Code session you run.**
